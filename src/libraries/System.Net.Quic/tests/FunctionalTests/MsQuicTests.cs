@@ -48,11 +48,11 @@ namespace System.Net.Quic.Tests
 
     [Collection(nameof(QuicTestCollection))]
     [ConditionalClass(typeof(QuicTestBase), nameof(QuicTestBase.IsSupported), nameof(QuicTestBase.IsNotArm32CoreClrStressTest))]
-    [ActiveIssue("https://github.com/dotnet/runtime/issues/91757", typeof(PlatformDetection), nameof(PlatformDetection.IsArmProcess))]
     public class MsQuicTests : QuicTestBase, IClassFixture<CertificateSetup>
     {
         private static byte[] s_data = "Hello world!"u8.ToArray();
         readonly CertificateSetup _certificates;
+        static bool DoesNotSupportAsyncCertValidation => QuicTestCollection.MsQuicVersion < new Version(2, 4);
 
         public MsQuicTests(ITestOutputHelper output, CertificateSetup setup) : base(output)
         {
@@ -153,7 +153,8 @@ namespace System.Net.Quic.Tests
             };
             QuicListener listener = await CreateQuicListener(listenerOptions);
 
-            await Assert.ThrowsAsync<AuthenticationException>(async () => await CreateConnectedQuicConnection(listener));
+            await Assert.ThrowsAsync<AuthenticationException>(async () => await CreateQuicConnection(listener.LocalEndPoint));
+            await Assert.ThrowsAsync<ArgumentException>(async () => await listener.AcceptConnectionAsync());
 
             // Dispose everything and check if all weak references are dead.
             await listener.DisposeAsync();
@@ -353,7 +354,7 @@ namespace System.Net.Quic.Tests
         }
 
         [Fact]
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/99074")]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/99074", typeof(MsQuicTests), nameof(DoesNotSupportAsyncCertValidation))]
         public async Task CertificateCallbackThrowPropagates()
         {
             using CancellationTokenSource cts = new CancellationTokenSource(PassingTestTimeout);
@@ -579,7 +580,7 @@ namespace System.Net.Quic.Tests
                     return true;
                 };
 
-                await CreateQuicConnection(clientOptions);
+                await using QuicConnection connection = await CreateQuicConnection(clientOptions);
             }
             finally
             {
@@ -867,10 +868,13 @@ namespace System.Net.Quic.Tests
             // Open one stream, second call should block
             await using var stream = await clientConnection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional);
             await stream.WriteAsync(new byte[64 * 1024], completeWrites: true);
-            await Assert.ThrowsAsync<TimeoutException>(() => clientConnection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional).AsTask().WaitAsync(TimeSpan.FromSeconds(1)));
+            var pendingOpenStreamTask = clientConnection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional);
+            Assert.False(pendingOpenStreamTask.IsCompleted);
 
             await clientConnection.DisposeAsync();
             await serverConnection.DisposeAsync();
+
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () => await pendingOpenStreamTask);
         }
 
         [Theory]

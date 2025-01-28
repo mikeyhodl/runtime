@@ -341,6 +341,8 @@ void Compiler::lvaInitArgs(InitVarDscInfo* varDscInfo)
 
 #if defined(TARGET_ARM) && defined(PROFILING_SUPPORTED)
     // Prespill all argument regs on to stack in case of Arm when under profiler.
+    // We do this as the arm32 CORINFO_HELP_FCN_ENTER helper does not preserve
+    // these registers, and is called very early.
     if (compIsProfilerHookNeeded())
     {
         codeGen->regSet.rsMaskPreSpillRegArg |= RBM_ARG_REGS;
@@ -2501,9 +2503,9 @@ bool Compiler::StructPromotionHelper::CanPromoteStructVar(unsigned lclNum)
         return false;
     }
 
-    if (varDsc->lvStackAllocatedBox)
+    if (varDsc->lvStackAllocatedObject)
     {
-        JITDUMP("  struct promotion of V%02u is disabled because it is a stack allocated box\n", lclNum);
+        JITDUMP("  struct promotion of V%02u is disabled because it is a stack allocated object\n", lclNum);
         return false;
     }
 
